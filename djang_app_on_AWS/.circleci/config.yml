@@ -1,0 +1,99 @@
+version: 2.1
+
+parameters:
+  ci_script:
+    type: string
+    default: "./build_steps/ci.sh"
+  cd_script:
+    type: string
+    default: "./build_steps/cd.sh"
+
+workflows:
+  ci_pipeline_only:
+    jobs:
+      - ci-pipeline
+      - cd-pipeline-app-deployment:
+          filters:
+            branches:
+              only:
+                - main
+          requires:
+              - ci-pipeline
+  scheduled_ci_cd_pipeline:
+    triggers:
+      - schedule:
+          # Runs At 20:00 on day-of-month 1
+          cron: "0 20 1 * *"
+          filters:
+            branches:
+              only:
+                - main
+    jobs:
+      - ci-pipeline
+      - cd-pipeline-app-deployment:
+          requires:
+              - ci-pipeline
+      - cd-pipeline-infra:
+          requires:
+              - cd-pipeline-app-deployment
+
+jobs:
+  ci-pipeline:
+    machine:
+      image: ubuntu-2004:202010-01
+    steps:
+      - checkout
+      - run:
+          name: "Build CI/CD and webapp docker image"
+          command: << pipeline.parameters.ci_script >> build
+      - run:
+          name: "Run postgres and redis databases"
+          command: << pipeline.parameters.ci_script >> start_db
+      - run:
+          name: "Run unit tests"
+          command: << pipeline.parameters.ci_script >> unit_tests
+      - run:
+          name: "Run pre commit hooks (linting)"
+          command: << pipeline.parameters.ci_script >> lint
+      - run:
+          name: "Run webapp container and check health"
+          command: << pipeline.parameters.ci_script >> healthcheck
+      - run:
+          name: "Stop and remove all containers"
+          command: << pipeline.parameters.ci_script >> clean
+      - run:
+          name: "Publish images to Dockerhub"
+          command: << pipeline.parameters.ci_script >> push_images
+  cd-pipeline-app-deployment:
+    machine:
+      image: ubuntu-2004:202010-01
+    steps:
+      - checkout
+      - run:
+          name: "Push variables to ssm paramter store for CD pipeline"
+          command: << pipeline.parameters.ci_script >> put_ssm_vars
+      - run:
+          name: "Deploy newest application image on the live stack ec2 instances"
+          command: CFN_STACK_NAME=live << pipeline.parameters.cd_script >> code_deploy
+  cd-pipeline-infra:
+    machine:
+      image: ubuntu-2004:202010-01
+    steps:
+      - checkout
+      - run:
+          name: Create AWS infrastructure
+          no_output_timeout: 30m
+          command: CFN_STACK_NAME=demo R53_SUB_DOMAIN=True << pipeline.parameters.cd_script >> cfn_create
+      - run:
+          name: Deploy application to AWS
+          command: CFN_STACK_NAME=demo << pipeline.parameters.cd_script >> code_deploy
+      - run:
+          name: Load Testing application
+          command: CFN_STACK_NAME=demo R53_SUB_DOMAIN=True << pipeline.parameters.cd_script >> load_testing
+      - run:
+          name: Delete AWS infrastructure
+          command: CFN_STACK_NAME=demo << pipeline.parameters.cd_script >> cfn_destroy_async
+      - run:
+          name: CD build has failed! Cleaning up any created AWS resources...
+          command: CFN_STACK_NAME=demo << pipeline.parameters.cd_script >> cfn_destroy_async || true
+          when: on_fail

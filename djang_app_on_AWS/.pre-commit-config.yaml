@@ -1,0 +1,84 @@
+repos:
+  - repo: local
+    hooks:
+      - id: autoflake
+        name: autoflake
+        stages: [commit]
+        language: system
+        entry: autoflake
+        args:
+          - '--in-place'
+          - '--remove-all-unused-imports'
+          - '--remove-unused-variables'
+          - "--ignore-init-module-imports"
+        types: [python]
+
+      - id: isort
+        name: isort
+        stages: [commit]
+        language: system
+        entry: isort
+        args:
+          - "--line-width"
+          - "88"
+          - "--multi-line"
+          - "3"
+          - "--trailing-comma"
+          - "--use-parentheses"
+        types: [python]
+
+      - id: black
+        name: black
+        stages: [commit]
+        language: system
+        entry: black
+        types: [python]
+
+      - id: pylint
+        name: pylint
+        stages: [commit]
+        language: system
+        entry: pylint
+        args: ["app", "--fail-under", "9.5", "--load-plugins", "pylint_django"]
+        types: [python]
+
+      - id: yamllint
+        name: yamllint
+        stages: [commit]
+        language: system
+        entry: bash -c "yamllint . -d relaxed --no-warnings"
+        types: [yaml]
+
+      - id: cfnlint
+        name: cfnlint
+        stages: [commit]
+        language: system
+        entry: bash -c "cfn-lint deployment/prod/cloudformation/**/*.yaml --ignore-checks W3002"
+        types: [yaml]
+
+  - repo: git://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.46.0
+    hooks:
+      - id: terraform_fmt
+      # - id: terraform_validate
+      - id: terraform_docs
+      - id: terraform_tflint
+        args:
+          - '--args=--only=terraform_deprecated_interpolation'
+          - '--args=--only=terraform_deprecated_index'
+          - '--args=--only=terraform_unused_declarations'
+          - '--args=--only=terraform_comment_syntax'
+          - '--args=--only=terraform_documented_outputs'
+          - '--args=--only=terraform_documented_variables'
+          - '--args=--only=terraform_typed_variables'
+          - '--args=--only=terraform_module_pinned_source'
+          - '--args=--only=terraform_naming_convention'
+          - '--args=--only=terraform_required_version'
+          - '--args=--only=terraform_required_providers'
+          - '--args=--only=terraform_standard_module_structure'
+          - '--args=--only=terraform_workspace_remote'
+
+  - repo: git://github.com/pre-commit/pre-commit-hooks
+    rev: v3.4.0
+    hooks:
+      - id: check-merge-conflict
